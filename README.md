@@ -22,7 +22,7 @@
 
 
 
-**bizradar** offers a Pythonic way to fetch financial statements, key ratios, historical prices, dividends, and more for companies listed on the Warsaw Stock Exchange (GPW) from BiznesRadar.pl.
+**bizradar** is an **unofficial Python API wrapper and web scraper** for BiznesRadar.pl, providing **screen-scraped**  financial statements, key ratios, historical prices, dividends, and more for companies listed on the Warsaw Stock Exchange (GPW) from BiznesRadar.pl.
 
 > [!IMPORTANT]
 > **BiznesRadar.pl** is a trademark of Grupa Finansowa Media sp. z o.o.
