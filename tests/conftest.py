@@ -121,6 +121,18 @@ PROFILE_HTML = """
 </body></html>
 """
 
+PROFILE_NUMERIC_HTML = """
+<html><body>
+<table class="profileSummary">
+  <tr><th>ISIN:</th><td>PLTEST000001</td></tr>
+  <tr><th>Liczba akcji:</th><td>980 400 000</td></tr>
+  <tr><th>Kapitalizacja:</th><td>40 392 480 000</td></tr>
+  <tr><th>Enterprise Value:</th><td>40 675 037 000</td></tr>
+  <tr><th>Branża:</th><td>Sieci handlowe</td></tr>
+</table>
+</body></html>
+"""
+
 DIVIDEND_HTML = """
 <html><body>
 <table>

@@ -430,13 +430,19 @@ def fetch_corporate_actions(
 def fetch_profile(
     ticker: str,
     session: requests.Session | None = None,
-) -> dict[str, str]:
-    """Fetch basic company profile info (ISIN, name, address, sector, etc.)."""
+) -> dict[str, str | float]:
+    """Fetch basic company profile info (ISIN, name, address, sector, etc.).
+    
+    Numeric fields (Liczba akcji, Kapitalizacja, Enterprise Value) are converted to float.
+    """
+    # Fields that should be converted from strings to numbers
+    NUMERIC_FIELDS = {"Liczba akcji", "Kapitalizacja", "Enterprise Value"}
+    
     with _managed_session(session) as s:
         url = f"{BASE_URL}/akcjonariat/{ticker}"
         soup = _fetch_html(url, s)
 
-        info: dict[str, str] = {}
+        info: dict[str, str | float] = {}
         for table in soup.select("table.profileSummary"):
             for row in table.find_all("tr"):
                 cells = row.find_all(["th", "td"])
@@ -444,7 +450,12 @@ def fetch_profile(
                     key = cells[0].get_text(strip=True).rstrip(":")
                     val = cells[1].get_text(strip=True)
                     if val:
-                        info[key] = val
+                        # Try to convert numeric fields
+                        if key in NUMERIC_FIELDS:
+                            num_val = _text_to_number(val)
+                            info[key] = num_val if num_val is not None else val
+                        else:
+                            info[key] = val
         return info
 
 
@@ -512,6 +523,38 @@ def fetch_dividends(
 
         df = pd.DataFrame(records)
         return df.sort_values("Year", ascending=False).reset_index(drop=True)
+
+
+def adjust_for_splits(
+    history: pd.DataFrame,
+    actions: pd.DataFrame,
+) -> pd.DataFrame:
+    """Adjust historical OHLCV data for stock splits.
+
+    Divides prices and multiplies volume for all data points before each split date.
+    Multiple splits are handled cumulatively.
+    """
+    if history.empty or actions.empty:
+        return history
+
+    splits = actions[actions["Dzielnik"].notna() & (actions["Dzielnik"] != 1.0)]
+    if splits.empty:
+        return history
+
+    df = history.copy()
+    price_cols = [c for c in ("Otwarcie", "Max", "Min", "Zamknięcie") if c in df.columns]
+
+    for _, split in splits.iterrows():
+        split_date = split["Data"]
+        divisor = split["Dzielnik"]
+        mask = df.index < split_date
+        if not mask.any():
+            continue
+        df.loc[mask, price_cols] = df.loc[mask, price_cols] / divisor
+        if "Wolumen" in df.columns:
+            df.loc[mask, "Wolumen"] = df.loc[mask, "Wolumen"] * divisor
+
+    return df
 
 
 def fetch_rating(

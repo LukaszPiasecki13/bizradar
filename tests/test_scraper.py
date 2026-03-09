@@ -7,6 +7,7 @@ import requests
 from bizradar._scraper import (
     _managed_session,
     _parse_report_table,
+    adjust_for_splits,
     fetch_corporate_actions,
     fetch_dividends,
     fetch_history,
@@ -32,6 +33,7 @@ from .conftest import (
     INCOME_STATEMENT_TYS_HTML,
     MockSession,
     PROFILE_HTML,
+    PROFILE_NUMERIC_HTML,
     RATING_HTML,
     REPORT_EMPTY_ROWS_HTML,
     REPORT_NO_TABLE_HTML,
@@ -323,6 +325,26 @@ class TestFetchProfile:
         assert profile["ISIN"] == "PLDINPL00011"
         assert profile["Sektor"] == "Handel detaliczny"
 
+    def test_numeric_fields_are_float(self):
+        session = MockSession(PROFILE_NUMERIC_HTML)
+        profile = fetch_profile("DNP", session=session)
+        assert isinstance(profile["Liczba akcji"], float)
+        assert isinstance(profile["Kapitalizacja"], float)
+        assert isinstance(profile["Enterprise Value"], float)
+
+    def test_numeric_field_values(self):
+        session = MockSession(PROFILE_NUMERIC_HTML)
+        profile = fetch_profile("DNP", session=session)
+        assert profile["Liczba akcji"] == 980_400_000.0
+        assert profile["Kapitalizacja"] == 40_392_480_000.0
+        assert profile["Enterprise Value"] == 40_675_037_000.0
+
+    def test_text_fields_remain_str(self):
+        session = MockSession(PROFILE_NUMERIC_HTML)
+        profile = fetch_profile("DNP", session=session)
+        assert isinstance(profile["ISIN"], str)
+        assert isinstance(profile["Branża"], str)
+
 
 # ---------------------------------------------------------------------------
 # fetch_dividends
@@ -415,3 +437,148 @@ class TestFetchRating:
         details = result["piotroski_details"]
         assert isinstance(details, pd.DataFrame)
         assert len(details) == 2
+
+
+# ---------------------------------------------------------------------------
+# adjust_for_splits
+# ---------------------------------------------------------------------------
+
+class TestAdjustForSplits:
+    """Tests for the adjust_for_splits function."""
+
+    def _make_history(self, dates, opens, highs, lows, closes, volumes=None):
+        data = {
+            "Otwarcie": opens,
+            "Max": highs,
+            "Min": lows,
+            "Zamknięcie": closes,
+        }
+        if volumes is not None:
+            data["Wolumen"] = [float(v) for v in volumes]
+        return pd.DataFrame(data, index=pd.to_datetime(dates))
+
+    def _make_actions(self, dates, divisors):
+        return pd.DataFrame({
+            "Data": pd.to_datetime(dates),
+            "Typ": ["Podział"] * len(dates),
+            "Nominalnie": [None] * len(dates),
+            "Dzielnik": [float(d) for d in divisors],
+        })
+
+    def test_empty_history_returns_empty(self):
+        actions = self._make_actions(["2025-07-31"], [10.0])
+        result = adjust_for_splits(pd.DataFrame(), actions)
+        assert result.empty
+
+    def test_empty_actions_returns_unchanged(self):
+        h = self._make_history(["2025-01-01"], [100.0], [110.0], [90.0], [105.0])
+        result = adjust_for_splits(h, pd.DataFrame())
+        pd.testing.assert_frame_equal(result, h)
+
+    def test_divisor_one_no_change(self):
+        h = self._make_history(["2025-01-01"], [100.0], [110.0], [90.0], [105.0])
+        actions = self._make_actions(["2025-07-31"], [1.0])
+        result = adjust_for_splits(h, actions)
+        pd.testing.assert_frame_equal(result, h)
+
+    def test_nan_divisor_skipped(self):
+        h = self._make_history(["2025-01-01"], [100.0], [110.0], [90.0], [105.0])
+        actions = pd.DataFrame({
+            "Data": pd.to_datetime(["2025-07-31"]),
+            "Typ": ["Podział"],
+            "Nominalnie": [None],
+            "Dzielnik": [None],
+        })
+        result = adjust_for_splits(h, actions)
+        pd.testing.assert_frame_equal(result, h)
+
+    def test_prices_before_split_divided(self):
+        h = self._make_history(
+            ["2025-01-01", "2025-07-31", "2025-08-01"],
+            [1000.0, 100.0, 100.0],
+            [1100.0, 110.0, 110.0],
+            [900.0,  90.0,  90.0],
+            [1050.0, 105.0, 105.0],
+        )
+        result = adjust_for_splits(h, self._make_actions(["2025-07-31"], [10.0]))
+        assert result.loc["2025-01-01", "Otwarcie"] == pytest.approx(100.0)
+        assert result.loc["2025-01-01", "Max"]      == pytest.approx(110.0)
+        assert result.loc["2025-01-01", "Min"]      == pytest.approx(90.0)
+        assert result.loc["2025-01-01", "Zamknięcie"] == pytest.approx(105.0)
+
+    def test_split_date_not_adjusted(self):
+        h = self._make_history(
+            ["2025-01-01", "2025-07-31", "2025-08-01"],
+            [1000.0, 100.0, 100.0],
+            [1000.0, 100.0, 100.0],
+            [1000.0, 100.0, 100.0],
+            [1000.0, 100.0, 100.0],
+        )
+        result = adjust_for_splits(h, self._make_actions(["2025-07-31"], [10.0]))
+        assert result.loc["2025-07-31", "Zamknięcie"] == pytest.approx(100.0)
+        assert result.loc["2025-08-01", "Zamknięcie"] == pytest.approx(100.0)
+
+    def test_volume_before_split_multiplied(self):
+        h = self._make_history(
+            ["2025-01-01", "2025-08-01"],
+            [1000.0, 100.0], [1000.0, 100.0],
+            [1000.0, 100.0], [1000.0, 100.0],
+            volumes=[500.0, 5000.0],
+        )
+        result = adjust_for_splits(h, self._make_actions(["2025-07-31"], [10.0]))
+        assert result.loc["2025-01-01", "Wolumen"] == pytest.approx(5000.0)
+
+    def test_volume_after_split_unchanged(self):
+        h = self._make_history(
+            ["2025-01-01", "2025-08-01"],
+            [1000.0, 100.0], [1000.0, 100.0],
+            [1000.0, 100.0], [1000.0, 100.0],
+            volumes=[500.0, 5000.0],
+        )
+        result = adjust_for_splits(h, self._make_actions(["2025-07-31"], [10.0]))
+        assert result.loc["2025-08-01", "Wolumen"] == pytest.approx(5000.0)
+
+    def test_multiple_splits_cumulative(self):
+        """Data before both splits is adjusted by the product of both divisors."""
+        h = self._make_history(
+            ["2020-01-01", "2022-01-01", "2025-08-01"],
+            [1000.0, 500.0, 100.0],
+            [1000.0, 500.0, 100.0],
+            [1000.0, 500.0, 100.0],
+            [1000.0, 500.0, 100.0],
+        )
+        # Split ×2 in 2021, split ×5 in 2024
+        result = adjust_for_splits(h, self._make_actions(["2021-06-01", "2024-06-01"], [2.0, 5.0]))
+        assert result.loc["2020-01-01", "Zamknięcie"] == pytest.approx(100.0)   # 1000/2/5
+        assert result.loc["2022-01-01", "Zamknięcie"] == pytest.approx(100.0)   # 500/5
+        assert result.loc["2025-08-01", "Zamknięcie"] == pytest.approx(100.0)   # unchanged
+
+    def test_does_not_mutate_original(self):
+        h = self._make_history(
+            ["2025-01-01", "2025-08-01"],
+            [1000.0, 100.0], [1000.0, 100.0],
+            [1000.0, 100.0], [1000.0, 100.0],
+        )
+        original_price = h.loc["2025-01-01", "Otwarcie"]
+        adjust_for_splits(h, self._make_actions(["2025-07-31"], [10.0]))
+        assert h.loc["2025-01-01", "Otwarcie"] == original_price
+
+    def test_missing_volume_column_handled(self):
+        h = self._make_history(
+            ["2025-01-01", "2025-08-01"],
+            [1000.0, 100.0], [1000.0, 100.0],
+            [1000.0, 100.0], [1000.0, 100.0],
+        )
+        result = adjust_for_splits(h, self._make_actions(["2025-07-31"], [10.0]))
+        assert result.loc["2025-01-01", "Otwarcie"] == pytest.approx(100.0)
+        assert "Wolumen" not in result.columns
+
+    def test_split_before_all_data_has_no_effect(self):
+        """If all history is after the split date (split already in the past), nothing is adjusted."""
+        h = self._make_history(
+            ["2026-01-01", "2026-06-01"],
+            [100.0, 100.0], [100.0, 100.0],
+            [100.0, 100.0], [100.0, 100.0],
+        )
+        result = adjust_for_splits(h, self._make_actions(["2020-01-01"], [10.0]))
+        pd.testing.assert_frame_equal(result, h)

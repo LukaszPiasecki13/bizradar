@@ -16,6 +16,7 @@ _PATCH_DIVIDENDS = "bizradar.ticker.fetch_dividends"
 _PATCH_SHAREHOLDERS = "bizradar.ticker.fetch_shareholders"
 _PATCH_CORPORATE = "bizradar.ticker.fetch_corporate_actions"
 _PATCH_PROFILE = "bizradar.ticker.fetch_profile"
+_PATCH_ADJUST = "bizradar.ticker.adjust_for_splits"
 
 
 # ---------------------------------------------------------------------------
@@ -92,13 +93,17 @@ class TestCache:
         mock_fetch.assert_called_once()
         t._session.close()
 
-    def test_history_cached(self):
-        mock_fn = MagicMock(return_value=pd.DataFrame())
+    @patch(_PATCH_ADJUST)
+    @patch(_PATCH_CORPORATE)
+    @patch(_PATCH_HISTORY)
+    def test_history_cached(self, mock_history, mock_actions, mock_adjust):
+        mock_history.return_value = pd.DataFrame()
+        mock_actions.return_value = pd.DataFrame()
+        mock_adjust.return_value = pd.DataFrame()
         t = Ticker("DNP")
-        with patch.dict(_MarketData._FETCH_MAP, {"history": mock_fn}):
-            _ = t.market_data.history
-            _ = t.market_data.history
-        mock_fn.assert_called_once()
+        _ = t.market_data.history
+        _ = t.market_data.history
+        mock_history.assert_called_once()
         t._session.close()
 
     @patch(_PATCH_REPORT)
@@ -267,12 +272,22 @@ class TestIndicatorsAccessor:
 class TestMarketDataAccessor:
     """Tests for the _MarketData sub-object."""
 
-    def test_history(self):
-        mock_fn = MagicMock(return_value=pd.DataFrame())
+    @patch(_PATCH_ADJUST)
+    @patch(_PATCH_CORPORATE)
+    @patch(_PATCH_HISTORY)
+    def test_history(self, mock_history, mock_actions, mock_adjust):
+        raw = pd.DataFrame({"Zamknięcie": [100.0]})
+        actions_df = pd.DataFrame()
+        adjusted = pd.DataFrame({"Zamknięcie": [10.0]})
+        mock_history.return_value = raw
+        mock_actions.return_value = actions_df
+        mock_adjust.return_value = adjusted
         t = Ticker("DNP")
-        with patch.dict(_MarketData._FETCH_MAP, {"history": mock_fn}):
-            _ = t.market_data.history
-        mock_fn.assert_called_once_with("DNP", session=t._session)
+        result = t.market_data.history
+        mock_history.assert_called_once_with("DNP", session=t._session)
+        mock_actions.assert_called_once_with("DNP", session=t._session)
+        mock_adjust.assert_called_once_with(raw, actions_df)
+        pd.testing.assert_frame_equal(result, adjusted)
         t._session.close()
 
     def test_dividends(self):
@@ -312,6 +327,69 @@ class TestMarketDataAccessor:
         t = Ticker("DNP")
         with pytest.raises(AttributeError):
             _ = t.market_data.nonexistent
+        t._session.close()
+
+
+class TestHistorySplitAdjustment:
+    """Tests for the split-adjustment integration in _MarketData.history."""
+
+    @patch(_PATCH_ADJUST)
+    @patch(_PATCH_CORPORATE)
+    @patch(_PATCH_HISTORY)
+    def test_corporate_actions_fetched_alongside_history(self, mock_history, mock_actions, mock_adjust):
+        """Accessing history also fetches corporate_actions for split data."""
+        mock_history.return_value = pd.DataFrame()
+        mock_actions.return_value = pd.DataFrame()
+        mock_adjust.return_value = pd.DataFrame()
+        t = Ticker("DNP")
+        _ = t.market_data.history
+        mock_actions.assert_called_once_with("DNP", session=t._session)
+        t._session.close()
+
+    @patch(_PATCH_ADJUST)
+    @patch(_PATCH_CORPORATE)
+    @patch(_PATCH_HISTORY)
+    def test_history_reuses_cached_corporate_actions(self, mock_history, mock_actions, mock_adjust):
+        """If corporate_actions was already cached, history should not re-fetch it."""
+        mock_history.return_value = pd.DataFrame()
+        mock_actions.return_value = pd.DataFrame()
+        mock_adjust.return_value = pd.DataFrame()
+        t = Ticker("DNP")
+        _ = t.market_data.corporate_actions  # warm the cache
+        mock_actions.reset_mock()
+        _ = t.market_data.history            # should NOT call fetch_corporate_actions again
+        mock_actions.assert_not_called()
+        t._session.close()
+
+    @patch(_PATCH_ADJUST)
+    @patch(_PATCH_CORPORATE)
+    @patch(_PATCH_HISTORY)
+    def test_corporate_actions_cached_after_history_access(self, mock_history, mock_actions, mock_adjust):
+        """Accessing history should populate the corporate_actions cache."""
+        mock_history.return_value = pd.DataFrame()
+        mock_actions.return_value = pd.DataFrame()
+        mock_adjust.return_value = pd.DataFrame()
+        t = Ticker("DNP")
+        _ = t.market_data.history        # fetches both; caches corporate_actions
+        mock_actions.reset_mock()
+        _ = t.market_data.corporate_actions  # should come from cache
+        mock_actions.assert_not_called()
+        t._session.close()
+
+    @patch(_PATCH_ADJUST)
+    @patch(_PATCH_CORPORATE)
+    @patch(_PATCH_HISTORY)
+    def test_adjust_for_splits_receives_correct_args(self, mock_history, mock_actions, mock_adjust):
+        raw = pd.DataFrame({"Zamknięcie": [500.0, 100.0]})
+        actions_df = pd.DataFrame({"Data": pd.to_datetime(["2025-07-31"]), "Dzielnik": [10.0]})
+        mock_history.return_value = raw
+        mock_actions.return_value = actions_df
+        mock_adjust.return_value = raw.copy()
+        t = Ticker("DNP")
+        _ = t.market_data.history
+        args, _ = mock_adjust.call_args
+        pd.testing.assert_frame_equal(args[0], raw)
+        pd.testing.assert_frame_equal(args[1], actions_df)
         t._session.close()
 
 

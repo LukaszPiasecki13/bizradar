@@ -7,6 +7,7 @@ import requests
 
 from bizradar._constants import PERIOD_ANNUAL, PERIOD_QUARTERLY
 from bizradar._scraper import (
+    adjust_for_splits,
     fetch_corporate_actions,
     fetch_dividends,
     fetch_history,
@@ -112,7 +113,6 @@ class _MarketData(_CachedAccessor):
     }
 
     _FETCH_MAP = {
-        "history": fetch_history,
         "dividends": fetch_dividends,
         "shareholders": fetch_shareholders,
         "corporate_actions": fetch_corporate_actions,
@@ -120,10 +120,18 @@ class _MarketData(_CachedAccessor):
     }
 
     def __getattr__(self, name):
+        if name == "history":
+            return self._cached("history", self._fetch_adjusted_history)
         if name in self._FETCH_MAP:
             return self._cached(name, lambda: self._FETCH_MAP[name](
                 self._t.symbol, session=self._t._session))
         raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
+
+    def _fetch_adjusted_history(self) -> pd.DataFrame:
+        raw = fetch_history(self._t.symbol, session=self._t._session)
+        actions = self._cached("corporate_actions", lambda: fetch_corporate_actions(
+            self._t.symbol, session=self._t._session))
+        return adjust_for_splits(raw, actions)
 
 
 class Ticker:
