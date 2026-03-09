@@ -7,10 +7,18 @@ from bizradar._scraper import (
     _build_indicator_url,
     _build_url,
     _parse_period,
+    _parse_unit_multiplier,
     _parse_value,
     _text_to_number,
 )
 from bizradar._constants import BASE_URL, DISPLAY_MODE
+
+from .conftest import (
+    INCOME_STATEMENT_MLD_HTML,
+    INCOME_STATEMENT_MLN_HTML,
+    INCOME_STATEMENT_NO_UNIT_HTML,
+    INCOME_STATEMENT_TYS_HTML,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +86,34 @@ class TestParsePeriod:
 
     def test_plain_year(self):
         assert _parse_period("2023") == "2023"
+
+
+# ---------------------------------------------------------------------------
+# _parse_unit_multiplier
+# ---------------------------------------------------------------------------
+
+class TestParseUnitMultiplier:
+    """Tests for _parse_unit_multiplier helper."""
+
+    def test_tys_returns_1000(self):
+        soup = BeautifulSoup(INCOME_STATEMENT_TYS_HTML, "html.parser")
+        assert _parse_unit_multiplier(soup) == 1_000
+
+    def test_mln_returns_1_000_000(self):
+        soup = BeautifulSoup(INCOME_STATEMENT_MLN_HTML, "html.parser")
+        assert _parse_unit_multiplier(soup) == 1_000_000
+
+    def test_mld_returns_1_000_000_000(self):
+        soup = BeautifulSoup(INCOME_STATEMENT_MLD_HTML, "html.parser")
+        assert _parse_unit_multiplier(soup) == 1_000_000_000
+
+    def test_no_disclaimer_returns_1(self):
+        soup = BeautifulSoup(INCOME_STATEMENT_NO_UNIT_HTML, "html.parser")
+        assert _parse_unit_multiplier(soup) == 1
+
+    def test_empty_page_returns_1(self):
+        soup = BeautifulSoup("<html><body></body></html>", "html.parser")
+        assert _parse_unit_multiplier(soup) == 1
 
     def test_whitespace_stripped(self):
         assert _parse_period("  2022(gru 22)  ") == "2022"

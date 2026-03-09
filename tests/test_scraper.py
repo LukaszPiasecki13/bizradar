@@ -26,6 +26,10 @@ from .conftest import (
     HISTORY_HTML,
     HISTORY_PAGE2_HTML,
     INCOME_STATEMENT_HTML,
+    INCOME_STATEMENT_MLD_HTML,
+    INCOME_STATEMENT_MLN_HTML,
+    INCOME_STATEMENT_NO_UNIT_HTML,
+    INCOME_STATEMENT_TYS_HTML,
     MockSession,
     PROFILE_HTML,
     RATING_HTML,
@@ -137,6 +141,32 @@ class TestFetchReport:
         session = MockSession(INCOME_STATEMENT_HTML)
         df = fetch_report("DNP", "income_statement", period="Q", session=session)
         assert isinstance(df, pd.DataFrame)
+
+    def test_tys_unit_applied(self):
+        """Values from a 'dane w tys. PLN' page must be multiplied by 1000."""
+        session = MockSession(INCOME_STATEMENT_TYS_HTML)
+        df = fetch_report("DNP", "income_statement", session=session)
+        # Raw HTML value = 2000, expected after ×1000
+        assert df.loc["Przychody ze sprzedaży", "2024"] == 2_000_000.0
+        assert df.loc["Przychody ze sprzedaży", "2023"] == 1_000_000.0
+
+    def test_mln_unit_applied(self):
+        """Values from a 'dane w mln. PLN' page must be multiplied by 1_000_000."""
+        session = MockSession(INCOME_STATEMENT_MLN_HTML)
+        df = fetch_report("DNP", "income_statement", session=session)
+        assert df.loc["Przychody ze sprzedaży", "2024"] == 5_000_000.0
+
+    def test_mld_unit_applied(self):
+        """Values from a 'dane w mld. PLN' page must be multiplied by 1_000_000_000."""
+        session = MockSession(INCOME_STATEMENT_MLD_HTML)
+        df = fetch_report("DNP", "income_statement", session=session)
+        assert df.loc["Przychody ze sprzedaży", "2024"] == 3_000_000_000.0
+
+    def test_no_unit_disclaimer_no_multiplication(self):
+        """Without a disclaimer the values should be returned as-is."""
+        session = MockSession(INCOME_STATEMENT_NO_UNIT_HTML)
+        df = fetch_report("DNP", "income_statement", session=session)
+        assert df.loc["Wskaźnik", "2024"] == 42.0
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +350,23 @@ class TestFetchDividends:
         row_2024 = df[df["Year"] == 2024].iloc[0]
         assert row_2024["DPS_PLN"] == 5.30
         assert row_2024["Status"] == "Wypłacona"
+
+    def test_total_value_converted_to_pln(self):
+        """Total_Value_PLN and From_Reserve_PLN must be raw HTML value ×1000."""
+        session = MockSession(DIVIDEND_HTML)
+        df = fetch_dividends("DNP", session=session)
+        row_2024 = df[df["Year"] == 2024].iloc[0]
+        # Raw HTML value = 207 843 (tys. zł) → expected 207 843 000 PLN
+        assert row_2024["Total_Value_PLN"] == 207_843_000.0
+
+    def test_columns_in_pln(self):
+        """Ensure old kPLN column names are gone and PLN names are present."""
+        session = MockSession(DIVIDEND_HTML)
+        df = fetch_dividends("DNP", session=session)
+        assert "Total_Value_PLN" in df.columns
+        assert "From_Reserve_PLN" in df.columns
+        assert "Total_Value_kPLN" not in df.columns
+        assert "From_Reserve_kPLN" not in df.columns
 
     def test_sorted_descending_by_year(self):
         session = MockSession(DIVIDEND_HTML)

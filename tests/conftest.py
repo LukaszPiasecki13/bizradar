@@ -165,6 +165,71 @@ REPORT_EMPTY_ROWS_HTML = """
 </body></html>
 """
 
+INCOME_STATEMENT_TYS_HTML = """
+<html><body>
+<div class="report-disclaimer-above">dane w tys. PLN</div>
+<table class="report-table">
+  <tr>
+    <th class="f">Pozycja</th>
+    <td class="thq">2024(gru 24)</td>
+    <td class="thq">2023(gru 23)</td>
+  </tr>
+  <tr>
+    <td class="f">Przychody ze sprzedaży</td>
+    <td class="h"><span class="value"><span class="pv"><span>2 000</span></span></span></td>
+    <td class="h"><span class="value"><span class="pv"><span>1 000</span></span></span></td>
+  </tr>
+</table>
+</body></html>
+"""
+
+INCOME_STATEMENT_MLN_HTML = """
+<html><body>
+<div class="report-disclaimer-above">dane w mln. PLN</div>
+<table class="report-table">
+  <tr>
+    <th class="f">Pozycja</th>
+    <td class="thq">2024(gru 24)</td>
+  </tr>
+  <tr>
+    <td class="f">Przychody ze sprzedaży</td>
+    <td class="h"><span class="value"><span class="pv"><span>5</span></span></span></td>
+  </tr>
+</table>
+</body></html>
+"""
+
+INCOME_STATEMENT_MLD_HTML = """
+<html><body>
+<div class="report-disclaimer-above">dane w mld. PLN</div>
+<table class="report-table">
+  <tr>
+    <th class="f">Pozycja</th>
+    <td class="thq">2024(gru 24)</td>
+  </tr>
+  <tr>
+    <td class="f">Przychody ze sprzedaży</td>
+    <td class="h"><span class="value"><span class="pv"><span>3</span></span></span></td>
+  </tr>
+</table>
+</body></html>
+"""
+
+INCOME_STATEMENT_NO_UNIT_HTML = """
+<html><body>
+<table class="report-table">
+  <tr>
+    <th class="f">Pozycja</th>
+    <td class="thq">2024(gru 24)</td>
+  </tr>
+  <tr>
+    <td class="f">Wskaźnik</td>
+    <td class="h"><span class="value"><span class="pv"><span>42</span></span></span></td>
+  </tr>
+</table>
+</body></html>
+"""
+
 
 # ---------------------------------------------------------------------------
 # Mock response / session helpers

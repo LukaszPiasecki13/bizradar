@@ -128,6 +128,30 @@ def _text_to_number(text: str) -> float | None:
         return None
 
 
+_UNIT_MULTIPLIERS = {
+    "tys": 1_000,
+    "mln": 1_000_000,
+    "mld": 1_000_000_000,
+}
+
+
+def _parse_unit_multiplier(soup: BeautifulSoup) -> int:
+    """Extract the numeric multiplier from the report disclaimer.
+
+    Looks for text like 'dane w tys. PLN' in ``div.report-disclaimer-above``
+    and returns the corresponding multiplier (e.g. 1000).
+    Falls back to 1 if not found.
+    """
+    disclaimer = soup.select_one("div.report-disclaimer-above")
+    if disclaimer is None:
+        return 1
+    text = disclaimer.get_text(strip=True).lower()
+    for key, mult in _UNIT_MULTIPLIERS.items():
+        if key in text:
+            return mult
+    return 1
+
+
 def _parse_report_table(soup: BeautifulSoup) -> pd.DataFrame:
     """Parse the main report table from a BiznesRadar financial page.
 
@@ -204,6 +228,8 @@ def fetch_report(
 
     Returns:
         DataFrame with periods as columns and financial line items as rows.
+        Values are converted to base currency (PLN) from the original unit
+        shown on the page (typically thousands).
     """
     if report_type not in REPORT_URLS:
         raise ValueError(
@@ -214,7 +240,11 @@ def fetch_report(
     with _managed_session(session) as s:
         url = _build_url(report_type, ticker, period)
         soup = _fetch_html(url, s)
-        return _parse_report_table(soup)
+        multiplier = _parse_unit_multiplier(soup)
+        df = _parse_report_table(soup)
+        if multiplier != 1:
+            df = df.apply(lambda col: col * multiplier)
+        return df
 
 
 def fetch_indicator(
@@ -425,10 +455,10 @@ def fetch_dividends(
     """Fetch dividend history from the /dywidenda/ page.
 
     Returns a DataFrame with columns:
-    Year, Advance_PLN, DPS_PLN, Total_Value_kPLN, From_Reserve_kPLN,
+    Year, Advance_PLN, DPS_PLN, Total_Value_PLN, From_Reserve_PLN,
     Status, WZA_Date, Ex_Dividend_Date, Payment_Date.
 
-    Dividend yield is premium-locked and not included.
+    Monetary values are in PLN. Dividend yield is premium-locked and not included.
     """
     with _managed_session(session) as s:
         url = f"{BASE_URL}/{DIVIDEND_URL_SEGMENT}/{ticker}"
@@ -460,13 +490,15 @@ def fetch_dividends(
             def _date(t: str) -> str | None:
                 return t if t and t != "-" else None
 
+            total_val = _val(texts[3])
+            reserve_val = _val(texts[4])
             records.append(
                 {
                     "Year": int(year),
                     "Advance_PLN": _val(texts[1]),
                     "DPS_PLN": _val(texts[2]),
-                    "Total_Value_kPLN": _val(texts[3]),
-                    "From_Reserve_kPLN": _val(texts[4]),
+                    "Total_Value_PLN": total_val * 1000 if total_val is not None else None,
+                    "From_Reserve_PLN": reserve_val * 1000 if reserve_val is not None else None,
                     # texts[5] = stopa dywidendy (premium-locked)
                     "Status": texts[6] if texts[6] != "-" else None,
                     "WZA_Date": _date(texts[7]),
